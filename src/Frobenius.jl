@@ -18,3 +18,15 @@ function FrobeniusDistanceSq(U1::Matrix, V1::Matrix, U2::Matrix, V2::Matrix)
     return lowrankFrob(U1, V1) + lowrankFrob(U2, V2) - 2 * lowrankFrob(U1, V1, U2, V2)
 end
 
+function Loss(Y::SparseMatrixCSC, U::Matrix, V::Matrix)
+    """ Computes the loss ||Y - U*V'||_F^2 on the support of Y, where Y is a sparse matrix"""
+    loss = 0.
+    for col in 1:size(Y, 2)
+        nzrows = Y.rowval[Y.colptr[col]: Y.colptr[col+1]-1]
+        nzvals = Y.nzval[Y.colptr[col]: Y.colptr[col+1]-1]
+        for (row, val) in zip(nzrows, nzvals)
+            loss += (val - dot(U[row, :], V[col, :]))^2
+        end
+    end
+    return loss
+end

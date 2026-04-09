@@ -1,9 +1,6 @@
 import Base: iterate
-# using Distributions, TensorDecompositions, Kronecker
-# using Arpack
-# using PROPACK
 
-export ALSIterable, SoftImputeALSIterable, als!
+export ALSIterable, als!
 
 const Factor{T} = Union{Matrix{T}}
 

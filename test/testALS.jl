@@ -11,22 +11,27 @@ using ALS
     # Test lowrankFrob
     @test FrobeniusDistanceSq(A, B, C, D) ≈ norm(A*B' - C*D')^2 atol=1e-6
     @test lowrankFrob(A, B) ≈ norm(A*B')^2 atol=1e-6
+
+    # Test Loss
+    Y = sprandn(n, n, 0.01)
+    L, S, R = svd(Matrix(Y))
+    @test ALS.Loss(Y, L * Diagonal(S), Matrix(R)) ≈ 0. atol=1e-6
 end;
 
 @testset "ALSIterable" begin
-    m = 2000; n = 1000; k = 4
+    m = 2000; n = 1000; k = 4; τU=.1; τV=.1
     
     Y = sprandn(m, n, 0.01)
 
-    it = ALSIterable(Y, k)
+    it = ALSIterable(Y, k, τU=τU, τV=τV, tol=1e-05, maxiter=1000)
 
     @test size(it.U) == (m, k) || error("U has wrong size")
     @test size(it.V) == (n, k) || error("V has wrong size")
 
     @test it.maxiter == 1000 || error("maxiter has wrong value")
     @test it.tol == 1e-5 || error("tol has wrong value")
-    @test it.τU == .1 || error("τU has wrong value")
-    @test it.τV == .1 || error("τV has wrong value")
+    @test it.τU == τU || error("τU has wrong value")
+    @test it.τV == τV || error("τV has wrong value")
 end;
 
 
