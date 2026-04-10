@@ -1,8 +1,11 @@
 using LinearAlgebra, SparseArrays
 using Base.Threads
+using DataFrames, CSV
 using ALS
 using StatsBase, Distributions
 
+cdir = joinpath("paper", "output")
+## Auxiliary functions
 Loss(it::ALSIterable) = ALS.Loss(it.Y, it.U, it.V)
 
 function NormCalibration!(it::ALSIterable{T}) where T
@@ -22,7 +25,7 @@ function NormCalibration!(it::ALSIterable{T}) where T
     it.V = V * Diagonal(1 ./ S)
 end
 
-function run_experiment2(π::Real, n::Int, k::Int; m::Int = n, τU=.1, τV=.1, tol=1e-05, maxiter=1000)
+function run_experiment2(π::Real, n::Int, k::Int; m::Int = n, τU=1., τV=1., tol=1e-05, maxiter=1000)
     # Define Y as the product U0 * V0' but with probability p of observing each entry
     U0 = randn(m, k); V0 = randn(n, k)
     Ω = sprand(Bool, m, n, π)
@@ -35,7 +38,6 @@ function run_experiment2(π::Real, n::Int, k::Int; m::Int = n, τU=.1, τV=.1, t
         iteration_als = iter
     end
     
-    # U = randn(m, k); V = randn(n, k)
     alsGC = ALSIterable(Y, copy(U), copy(V); Calibrate! =ALS.GramCalibration!, τU=τU, τV=τV, tol=tol, maxiter=maxiter)
     iteration_alsGC = 0
     for (iter, Δ) in enumerate(alsGC)
@@ -48,65 +50,51 @@ function run_experiment2(π::Real, n::Int, k::Int; m::Int = n, τU=.1, τV=.1, t
         iteration_alsColGC = iter
     end
 
-    return Int(iteration_als), Int(iteration_alsGC), Int(iteration_alsColGC), als, alsGC, alsColGC
+    # computing test loss
+    Ω_c = dropzeros(.! Ω)
+    test_loss_als = ALS.Loss(Ω_c .* (U0 * V0'), als.U, als.V)
+    test_loss_alsGC = ALS.Loss(Ω_c .* (U0 * V0'), alsGC.U, alsGC.V)
+    test_loss_alsColGC = ALS.Loss(Ω_c .* (U0 * V0'), alsColGC.U, alsColGC.V)
+
+    return Int(iteration_als), Int(iteration_alsGC), Int(iteration_alsColGC), test_loss_als, test_loss_alsGC, test_loss_alsColGC, als, alsGC, alsColGC
 end
+
+## Running experiments and saving results
+# coefficient of sparsity (i.e. p = n ^ - α)
+sparsity = false; α = .3
+k = 3
 
 ns = [100, 200, 500, 1000]
 n_experiments = 50
-p = .25
-k = 3
-als_iters = zeros(n_experiments, length(ns))
-alsGC_iters = zeros(n_experiments, length(ns))
-alsColGC_iters = zeros(n_experiments, length(ns))
-final_errors_als = zeros(n_experiments, length(ns))
-final_errors_alsGC = zeros(n_experiments, length(ns))
-final_errors_alsColGC = zeros(n_experiments, length(ns))
+τ = 5.
 
-for (j, n) in enumerate(ns)
+# initialize dataframe with columns m, n, p, k, iterations, train_loss, test_loss
+results_als = DataFrame(
+    m = Int[], n = Int[], p = Float64[], k = Int[], τ = Float64[], 
+    iterations = Int[], train_loss = Float64[], test_loss = Float64[],
+)
+results_alsGC = copy(results_als)
+results_alsColGC = copy(results_als)
+
+for n in ns
     println("Running experiments for n = $n")
+    sparsity ? (p = n ^ -α) : (p = .25)
+
     Threads.@threads for i in 1:n_experiments
         println("Experiment $i")
-        iteration_als, iteration_alsGC, iteration_alsColGC, als, alsGC, alsColGC = run_experiment2(p, n÷2, k, m=2*n)
-        als_iters[i , j] = iteration_als
-        alsGC_iters[i , j] = iteration_alsGC
-        alsColGC_iters[i , j] = iteration_alsColGC
-        final_errors_als[i , j] = Loss(als)
-        final_errors_alsGC[i , j] = Loss(alsGC)
-        final_errors_alsColGC[i , j] = Loss(alsColGC)
-    end
-    # print column averages
-    mean(als_iters, dims=1) |> println
-    mean(alsColGC_iters, dims=1) |> println
-    mean(alsGC_iters, dims=1) |> println
-end
-
-
-fname = joinpath("paper", "output", "als_iters_k=$k.csv")
-open(fname, "w") do io
-    println(io, "m,n,iterations, final error")
-    for (j, n) in enumerate(ns)
-        for i in 1:n_experiments
-            println(io, "$(2*n),$(n÷2),$(als_iters[i, j]), $(final_errors_als[i, j])")
-        end
+        iters_als, iters_alsGC, iters_alsColGC, test_als, test_alsGC, test_alsColGC, als, alsGC, alsColGC = run_experiment2(p, n÷2, k, m=2*n, τU=τ, τV=τ)
+        push!(results_als, (2*n, n÷2, p, k, τ, iters_als, Loss(als), test_als))
+        push!(results_alsGC, (2*n, n÷2, p, k, τ, iters_alsGC, Loss(alsGC), test_alsGC))
+        push!(results_alsColGC, (2*n, n÷2, p, k, τ, iters_alsColGC, Loss(alsColGC), test_alsColGC))
     end
 end
 
-fname2 = joinpath("paper", "output", "alsGC_iters_k=$k.csv")
-open(fname2, "w") do io
-    println(io, "m,n,iterations, final error")
-    for (j, n) in enumerate(ns)
-        for i in 1:n_experiments
-            println(io, "$(2*n),$(n÷2),$(alsGC_iters[i, j]), $(final_errors_alsGC[i, j])")
-        end
-    end
-end
 
-fname3 = joinpath("paper", "output", "alsColGC_iters_k=$k.csv")
-open(fname3, "w") do io
-    println(io, "m,n,iterations, final error")
-    for (j, n) in enumerate(ns)
-        for i in 1:n_experiments
-            println(io, "$(2*n),$(n÷2),$(alsColGC_iters[i, j]), $(final_errors_alsColGC[i, j])")
-        end
-    end
-end
+output = sparsity ? joinpath(cdir, "als_iters_k=$(k)_sparse.csv") : joinpath(cdir, "als_iters_k=$k.csv")
+CSV.write(output, results_als)
+
+output2 = sparsity ? joinpath(cdir, "alsGC_iters_k=$(k)_sparse.csv") : joinpath(cdir, "alsGC_iters_k=$k.csv")
+CSV.write(output2, results_alsGC)
+
+output3 = sparsity ? joinpath(cdir, "alsColGC_iters_k=$(k)_sparse.csv") : joinpath(cdir, "alsColGC_iters_k=$k.csv")
+CSV.write(output3, results_alsColGC)
